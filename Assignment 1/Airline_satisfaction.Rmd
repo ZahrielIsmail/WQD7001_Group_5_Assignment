@@ -1,0 +1,104 @@
+---
+title: "Airline Satisafaction"
+output: html_notebook
+---
+
+#Data Extraction
+
+##Import libraries
+```{r, message=FALSE}
+#load necessary packages
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(readr)
+library(janitor)
+library(MASS)
+```
+
+
+##Load data as dataframe
+
+```{r}
+airline_df <- read_csv("data/airline_passenger_satisfaction.csv")
+head(airline_df)
+```
+
+##Dataframe Structure
+```{r}
+
+airline_df <- clean_names(airline_df)
+str(airline_df)
+```
+```{r}
+library(skimr)
+skim(airline_df)
+```
+
+#Correlation
+```{r}
+library(corrplot)
+
+airline_df_numeric <- airline_df %>% select_if(is.numeric)
+airline_df.cor <- cor(airline_df_numeric)
+corrplot(airline_df.cor)
+
+
+```
+
+# EDA using SmartEDA
+```{r}
+library(SmartEDA)
+
+ExpReport(airline_df,Target="satisfaction",label=NULL,op_file="test.html",op_dir=getwd(),sc=2,sn=2,Rc="Yes")
+```
+
+#Using mice package data imputation
+
+```{r}
+library(mice)
+library(dplyr)
+library(tidyr)
+library(skimr)
+
+#define function to impute using mice method:predictive mean matching
+impute_func <- function(df){
+  imp_model <- df %>% mice(m=1, maxit = 50, method = c("pmm"))
+  as_tibble(complete(imp_model,1))
+}
+
+#airline_df is the original, airline_df_imp is the new df with updated missing value
+airline_df_imp <- impute_func(airline_df)
+
+#to see the arrival delay new distribution
+skim(airline_df_imp)
+
+
+```
+```{r}
+
+airline_df_unclass <- sapply(airline_df_imp,unclass)
+skim(airline_df_unclass)
+head(airline_df_unclass)
+
+
+#model_LDA <- lda()
+```
+```{r}
+ggplot(data = airline_df_imp) +
+  geom_bar(mapping = aes(x = satisfaction, fill = satisfaction)) +
+  labs(y = "Number of response")
+```
+```{r}
+library(corrplot)
+
+airline_df_imp_numeric <- airline_df_imp %>% select_if(is.numeric)
+airline_df_imp.cor <- cor(airline_df_imp_numeric)
+corrplot(airline_df_imp.cor)
+```
+```{r}
+library(DataExplorer)
+create_report(airline_df_imp)
+```
+
