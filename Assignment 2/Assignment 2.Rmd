@@ -1,0 +1,225 @@
+## R Markdown
+
+To train model using caret library
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(readr)
+library(janitor)
+library(MASS)
+```
+
+```{r}
+airline_v1_df <- read_csv("Processed Airline Passenger Satisfaction.csv")
+airline_v1_df <- clean_names(airline_v1_df) %>% dplyr::select(-id)
+head(airline_v1_df)
+str(airline_v1_df)
+summary(airline_v1_df)
+```
+
+```{r import}
+library(caret)
+```
+
+perform one hot encoding on multiple categorical features
+
+```{r}
+
+encoder <- dummyVars(" ~ .", data=airline_v1_df)
+
+airline_v1_OH_df <- data.frame(predict(encoder, newdata = airline_v1_df))
+
+head(airline_v1_OH_df)
+
+```
+```{r}
+# select one column only for dual categorical value to minimise multicollinearity
+
+airline_v1_OH_df <- airline_v1_OH_df %>% dplyr::select(!c('genderMale','customer_typeReturning','type_of_travelPersonal','satisfactionNeutral.or.Dissatisfied')) %>%
+  rename(satisfaction = satisfactionSatisfied)
+
+airline_v1_OH_df$satisfaction <- as.factor(airline_v1_OH_df$satisfaction) %>% make.names()
+
+airline_v1_OH_df <- clean_names(airline_v1_OH_df)
+head(airline_v1_OH_df)
+  
+```
+
+
+Data splitting train test
+
+```{r}
+
+#create data partition
+
+set.seed(100)
+trainRN <- createDataPartition(airline_v1_OH_df$satisfaction, p=0.75, list=FALSE)
+
+airline_train.df <- airline_v1_OH_df[trainRN,]
+airline_test.df<- airline_v1_OH_df[-trainRN,]
+
+#create control parameter
+##cross validated for 5 times and choose class probabilities true as we are using classifier model
+fitControl <- trainControl(method = 'cv',number = 5, classProbs = TRUE)
+
+x_test.df <- airline_test.df %>% dplyr::select(-satisfaction)
+y_test.df <- airline_test.df %>% dplyr::select(satisfaction)
+y_test.df <- as.factor(y_test.df$satisfaction)
+
+confusion_matrices <- data.frame()
+model_results <- data.frame("Model Name" = character(),"Accuracy" = numeric(),"Sensitivity" = numeric(),"Specificity" = numeric(),"F1 Score" = numeric(),"Time" = numeric())
+#Declare ML Models
+model_names <- c("Logistic Regression","Gradient Boosting", "Decision Tree", "K-Nearest Neighbors", "Random Forest")
+
+
+
+```
+
+Train ML model
+```{r}
+model_list = list()
+predicted_model_list = list()
+for (model_name in model_names) {
+  
+  print(model_name)
+  set.seed(100)
+  start_time <- Sys.time()
+  
+  if (model_name == "Gradient Boosting") {
+    print("Running GBM")
+    model <- train(satisfaction ~ ., data = airline_train.df, method = "gbm", tuneLength = 5, trControl = fitControl)
+  } else if (model_name == "Decision Tree") {
+    print("Running NM")
+    model <- train(satisfaction ~ ., data = airline_train.df, method = "rpart", tuneLength = 5, trControl = fitControl)
+  } else if (model_name == "Logistic Regression") {
+    print("Running GLM")
+    model <- train(satisfaction ~ ., data = airline_train.df, method = "glm", tuneLength = 5, trControl = fitControl)
+    print("GLM ENDED")
+  } else if (model_name == "K-Nearest Neighbors") {
+    print("Running KNN")
+    model <- train(satisfaction ~ ., data = airline_train.df, method = "kknn", tuneLength = 5, trControl = fitControl)
+  } else if (model_name == "Random Forest") {
+    print("Running RF")
+    model <- train(satisfaction ~ ., data = airline_train.df, method = "rf", tuneLength = 5, trControl = fitControl)
+  }
+  
+  end_time <- Sys.time()
+  model_list <- append(model_list, list(model))
+  
+  predicted_model <- predict(model,x_test.df)
+  CM <- confusionMatrix(reference = y_test.df, data = predicted_model, mode='everything')
+  predicted_model_list <- append(model_list,list(predicted_model))
+  
+  accuracy <- CM$overall["Accuracy"]
+  sensitivity <- CM$byClass["Sensitivity"]
+  specificity <- CM$byClass["Specificity"]
+  f1_score <- CM$byClass["F1"]
+  
+  training_time <- end_time - start_time
+  
+  model_results <- rbind(model_results, c(Model = model_name, Accuracy = accuracy, Sensitivity = sensitivity, Specificity = specificity, F1_Score = f1_score, Test = "ENDLINE", Time = as.numeric(training_time)))
+  
+}
+  
+
+```
+
+```{r}
+
+#train model
+
+set.seed(100)
+
+## train ml model using SVM, parameter tuning set range 10
+## choose model selection in method = ??, refer here for the name https://topepo.github.io/caret/available-models.html
+model_v1 <- train(satisfaction ~., data = airline_train.df, method = 'glm' ,tuneLength = 5, trControl = fitControl)
+
+##view trained ml model
+model_v1
+
+```
+
+evaluate ml model
+```{r}
+#see accuracy across different cv
+plot(model_v1, main = 'Accuracy Modelv1')
+
+#see variable importance
+varimp_modelv1 <- varImp(model_v1)
+plot(varimp_modelv1, main = 'Variable Importance Modelv1')
+```
+
+```{r}
+#evaluate ml model using test set
+
+x_test.df <- airline_test.df %>% dplyr::select(-satisfaction)
+y_test.df <- airline_test.df %>% dplyr::select(satisfaction)
+y_test.df <- as.factor(y_test.df$satisfaction)
+
+predicted_modelv1 <- predict(model_v1,x_test.df)
+
+confusionMatrix(reference = y_test.df, data = predicted_modelv1, mode='everything')
+
+
+```
+
+```{r}
+#unclass as roc function only accept numeric value
+
+#test_target <- as.numeric(test_target)
+#pred_target <- as.numeric(predicted_modelv1)
+test_target <- unclass(y_test.df)
+pred_target <- unclass(predicted_modelv1)
+
+```
+```{r}
+library(randomForest)
+featureimportance = list()
+
+model1imp = varImp(model_list[[1]])
+model2imp = varImp(model_list[[2]])
+model3imp = varImp(model_list[[3]])
+model4imp = varImp(model_list[[4]])
+model5imp = varImp(model_list[[5]])
+
+
+```
+
+
+
+```{r}
+
+library(pROC)
+
+#create function to generate auc plot
+auc_model_func <- function(model,x = x_test.df, y = y_test.df){
+  
+  pred <- predict(model,x)
+  pred_unclass <- unclass(pred)
+  target_unclass <- unclass(y)
+  
+  auc_output <- roc(target_unclass,pred_unclass)
+  
+  plot(auc_output, ylim=c(0,1),xlim=c(1,0), print.thres=TRUE, main=paste('AUC:',round(auc_output$auc[[1]],2)))
+  abline(h=1,col='blue',lwd=2)
+  abline(h=0,col='red',lwd=2)
+  
+}
+
+```
+
+```{r}
+
+#run auc_model_func for each trained model in the model_list
+auc_model_func(model = model_list[[1]])
+auc_model_func(model = model_list[[2]])
+auc_model_func(model = model_list[[3]])
+auc_model_func(model = model_list[[4]])
+auc_model_func(model = model_list[[5]])
+
+
+```
+
